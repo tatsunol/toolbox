@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floor Plan 3D Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #1a1a1a;
+    --panel: rgba(28, 28, 30, 0.85);
+    --border: rgba(255, 255, 255, 0.1);
+    --text: #e8e8e8;
+    --text-dim: #888;
+    --accent: #4a9eff;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    font-size: 13px;
+  }
+
+  #canvas-container {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  #canvas-container canvas {
+    display: block;
+    outline: none;
+  }
+
+  #drop-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+  }
+
+  #drop-zone {
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    padding: 4rem 5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  #drop-zone:hover, #drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(74, 158, 255, 0.05);
+  }
+
+  #drop-zone svg {
+    width: 48px;
+    height: 48px;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+  }
+
+  #drop-zone h1 {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.02em;
+  }
+
+  #drop-zone p {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  #controls {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 260px;
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    z-index: 10;
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  #controls.hidden {
+    opacity: 0;
+    transform: translateX(20px);
+    pointer-events: none;
+  }
+
+  #controls.visible {
+    display: flex;
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .control-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .control-value {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--text);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--text);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+  }
+
+  select {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .button-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  button {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  button:active {
+    transform: scale(0.97);
+  }
+
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  button.primary:hover {
+    background: #6bb0ff;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 2px 0;
+  }
+
+  #hint {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 8px;
+    z-index: 10;
+    display: none;
+    pointer-events: none;
+  }
+
+  #hint.visible { display: block; }
+
+  #toggle-ui {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 11;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    transition: all 0.15s;
+  }
+
+  #toggle-ui.visible { display: flex; }
+  #toggle-ui:hover { background: rgba(255, 255, 255, 0.1); }
+
+  #toggle-ui svg { width: 16px; height: 16px; }
+
+  kbd {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: inherit;
+    color: var(--text);
+  }
+
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    z-index: 20;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="drop-overlay">
+  <div id="drop-zone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <h1>平面図を読み込む</h1>
+    <p>ドラッグ＆ドロップ / クリックして選択 / <kbd>Ctrl</kbd>+<kbd>V</kbd> でペースト</p>
+    <input type="file" id="file-input" accept="image/*" style="display:none">
+  </div>
+</div>
+
+<button id="toggle-ui" title="UIの表示切替 (H)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+</button>
+
+<div id="controls">
+  <div class="control-group">
+    <div class="control-header">
+      <span>FOV (視野角)</span>
+      <span class="control-value" id="fov-out">50°</span>
+    </div>
+    <input type="range" id="fov" min="10" max="120" value="50" step="1">
+  </div>
+
+  <div class="control-group">
+    <div class="control-header">
+      <span>平面の傾き</span>
+      <span class="control-value" id="tilt-out">0°</span>
+    </div>
+    <input type="range" id="tilt" min="-90" max="90" value="0" step="1">
+  </div>
+
+  <div class="control-group">
+    <div class="control-header">
+      <span>平面の回転</span>
+      <span class="control-value" id="roll-out">0°</span>
+    </div>
+    <input type="range" id="roll" min="-180" max="180" value="0" step="1">
+  </div>
+
+  <div class="control-group">
+    <div class="control-header">
+      <span>不透明度</span>
+      <span class="control-value" id="opacity-out">100%</span>
+    </div>
+    <input type="range" id="opacity" min="10" max="100" value="100" step="1">
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="control-group">
+    <div class="control-header"><span>背景</span></div>
+    <select id="bg-select">
+      <option value="dark">ダーク</option>
+      <option value="grid">グリッド (明)</option>
+      <option value="grid-dark">グリッド (暗)</option>
+      <option value="white">ホワイト</option>
+      <option value="transparent">透明 (チェッカー)</option>
+    </select>
+  </div>
+
+  <div class="button-row">
+    <button id="view-persp">パース</button>
+    <button id="view-top">真上</button>
+    <button id="view-front">正面</button>
+    <button id="view-reset">リセット</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="button-row">
+    <button id="load-other">別の画像</button>
+    <button id="screenshot" class="primary">PNG保存</button>
+  </div>
+</div>
+
+<div id="hint">
+  左ドラッグ:回転 / 右ドラッグ:パン / ホイール:ズーム / <kbd>Ctrl</kbd>+<kbd>V</kbd>:ペースト / <kbd>Ctrl</kbd>+<kbd>C</kbd>:コピー / <kbd>H</kbd>:UI切替
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function() {
+  const canvasContainer = document.getElementById('canvas-container');
+  const dropOverlay = document.getElementById('drop-overlay');
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const controls_panel = document.getElementById('controls');
+  const toggleUiBtn = document.getElementById('toggle-ui');
+  const hint = document.getElementById('hint');
+
+  let scene, camera, renderer, controls, planeMesh, gridHelper, axesHelper;
+  let currentTexture = null;
+  let uiVisible = true;
+  let currentBg = 'dark';
+
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  async function copyCanvasToClipboard() {
+    if (!renderer) return;
+    try {
+      renderer.render(scene, camera);
+      const blob = await new Promise((resolve, reject) => {
+        renderer.domElement.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error('toBlob returned null'));
+        }, 'image/png');
+      });
+      if (!navigator.clipboard || !window.ClipboardItem) {
+        throw new Error('Clipboard API unsupported');
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob })
+      ]);
+      showToast('✓ クリップボードにコピーしました');
+    } catch (err) {
+      console.error(err);
+      showToast('✗ コピー失敗 — Sキーで保存してください');
+    }
+  }
+
+  function initThree() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a);
+
+    camera = new THREE.PerspectiveCamera(50, w / h, 0.01, 1000);
+    camera.position.set(0, 4, 5);
+
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true
+    });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    canvasContainer.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.target.set(0, 0, 0);
+
+    gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x2a2a2a);
+    scene.add(gridHelper);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+    scene.add(ambient);
+
+    window.addEventListener('resize', onResize);
+    animate();
+  }
+
+  function onResize() {
+    if (!renderer) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (controls) controls.update();
+    if (renderer && scene && camera) renderer.render(scene, camera);
+  }
+
+  function loadImage(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        dropOverlay.style.display = 'none';
+        controls_panel.classList.add('visible');
+        toggleUiBtn.classList.add('visible');
+        hint.classList.add('visible');
+
+        if (!scene) initThree();
+        setTimeout(onResize, 50);
+
+        if (currentTexture) currentTexture.dispose();
+        if (planeMesh) {
+          scene.remove(planeMesh);
+          planeMesh.geometry.dispose();
+          planeMesh.material.dispose();
+        }
+
+        const tex = new THREE.Texture(img);
+        tex.needsUpdate = true;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        currentTexture = tex;
+
+        const aspect = img.width / img.height;
+        const planeWidth = 6;
+        const planeHeight = planeWidth / aspect;
+
+        const geo = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const mat = new THREE.MeshBasicMaterial({
+          map: tex,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 1
+        });
+        planeMesh = new THREE.Mesh(geo, mat);
+        planeMesh.rotation.x = -Math.PI / 2;
+        scene.add(planeMesh);
+
+        applyRotations();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function applyRotations() {
+    if (!planeMesh) return;
+    const tilt = parseFloat(document.getElementById('tilt').value) * Math.PI / 180;
+    const roll = parseFloat(document.getElementById('roll').value) * Math.PI / 180;
+    planeMesh.rotation.set(-Math.PI / 2 + tilt, 0, roll);
+  }
+
+  function setBackground(mode) {
+    currentBg = mode;
+    if (!scene) return;
+    if (mode === 'dark') {
+      scene.background = new THREE.Color(0x1a1a1a);
+      gridHelper.visible = false;
+      document.body.style.background = '#1a1a1a';
+    } else if (mode === 'grid') {
+      scene.background = new THREE.Color(0xf5f5f5);
+      gridHelper.material.color.setHex(0xcccccc);
+      gridHelper.visible = true;
+      document.body.style.background = '#f5f5f5';
+    } else if (mode === 'grid-dark') {
+      scene.background = new THREE.Color(0x1a1a1a);
+      gridHelper.material.color.setHex(0x444444);
+      gridHelper.visible = true;
+      document.body.style.background = '#1a1a1a';
+    } else if (mode === 'white') {
+      scene.background = new THREE.Color(0xffffff);
+      gridHelper.visible = false;
+      document.body.style.background = '#ffffff';
+    } else if (mode === 'transparent') {
+      scene.background = null;
+      gridHelper.visible = false;
+      document.body.style.background = `
+        linear-gradient(45deg, #333 25%, transparent 25%),
+        linear-gradient(-45deg, #333 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #333 75%),
+        linear-gradient(-45deg, transparent 75%, #333 75%)
+      `;
+      document.body.style.backgroundSize = '20px 20px';
+      document.body.style.backgroundPosition = '0 0, 0 10px, 10px -10px, -10px 0px';
+      document.body.style.backgroundColor = '#222';
+    }
+  }
+
+  // Drop zone
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) loadImage(e.target.files[0]);
+  });
+
+  ['dragover', 'dragenter'].forEach(evt => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'dragend'].forEach(evt => {
+    dropZone.addEventListener(evt, () => dropZone.classList.remove('dragover'));
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]);
+  });
+
+  // Window-level drop to swap images
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files[0] && planeMesh) {
+      loadImage(e.dataTransfer.files[0]);
+    }
+  });
+
+  // Clipboard paste — works before and after first image is loaded
+  window.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || window.clipboardData)?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          loadImage(file);
+          return;
+        }
+      }
+    }
+  });
+
+  // Clipboard copy — copies current render as PNG
+  window.addEventListener('copy', (e) => {
+    if (!planeMesh) return; // no image loaded yet, let default copy happen
+    // skip if user is copying text from an input
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    copyCanvasToClipboard();
+  });
+
+  // Control bindings
+  document.getElementById('fov').addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('fov-out').textContent = Math.round(v) + '°';
+    if (camera) {
+      camera.fov = v;
+      camera.updateProjectionMatrix();
+    }
+  });
+
+  document.getElementById('tilt').addEventListener('input', (e) => {
+    document.getElementById('tilt-out').textContent = Math.round(parseFloat(e.target.value)) + '°';
+    applyRotations();
+  });
+
+  document.getElementById('roll').addEventListener('input', (e) => {
+    document.getElementById('roll-out').textContent = Math.round(parseFloat(e.target.value)) + '°';
+    applyRotations();
+  });
+
+  document.getElementById('opacity').addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('opacity-out').textContent = Math.round(v) + '%';
+    if (planeMesh) planeMesh.material.opacity = v / 100;
+  });
+
+  document.getElementById('bg-select').addEventListener('change', (e) => {
+    setBackground(e.target.value);
+  });
+
+  document.getElementById('view-persp').addEventListener('click', () => {
+    if (!camera) return;
+    camera.position.set(4, 4, 6);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  });
+
+  document.getElementById('view-top').addEventListener('click', () => {
+    if (!camera) return;
+    camera.position.set(0, 8, 0.001);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  });
+
+  document.getElementById('view-front').addEventListener('click', () => {
+    if (!camera) return;
+    camera.position.set(0, 0.5, 7);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  });
+
+  document.getElementById('view-reset').addEventListener('click', () => {
+    if (!camera) return;
+    camera.position.set(0, 4, 5);
+    camera.fov = 50;
+    camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0);
+    controls.update();
+    document.getElementById('fov').value = 50;
+    document.getElementById('fov-out').textContent = '50°';
+    document.getElementById('tilt').value = 0;
+    document.getElementById('tilt-out').textContent = '0°';
+    document.getElementById('roll').value = 0;
+    document.getElementById('roll-out').textContent = '0°';
+    applyRotations();
+  });
+
+  document.getElementById('load-other').addEventListener('click', () => fileInput.click());
+
+  document.getElementById('screenshot').addEventListener('click', () => {
+    if (!renderer) return;
+    renderer.render(scene, camera);
+    const link = document.createElement('a');
+    link.download = 'floor-plan-3d-' + Date.now() + '.png';
+    link.href = renderer.domElement.toDataURL('image/png');
+    link.click();
+  });
+
+  // UI toggle
+  function toggleUI() {
+    uiVisible = !uiVisible;
+    if (uiVisible) {
+      controls_panel.classList.remove('hidden');
+      hint.classList.remove('hidden');
+      toggleUiBtn.style.opacity = '1';
+    } else {
+      controls_panel.classList.add('hidden');
+      hint.classList.add('hidden');
+      toggleUiBtn.style.opacity = '0.3';
+    }
+  }
+
+  toggleUiBtn.addEventListener('click', toggleUI);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'h' || e.key === 'H') toggleUI();
+    if (e.key === 's' || e.key === 'S') document.getElementById('screenshot').click();
+  });
+})();
+</script>
+</body>
+</html>
